@@ -45,20 +45,22 @@ def _norm(s: str) -> str:
 
 def detect_event_status(event_html: str) -> str:
     soup = BeautifulSoup(event_html, "lxml")
-    text = _norm(soup.get_text(" ", strip=True))
 
-    # 1) Signaux SOLD_OUT (forts)
+    # texte visible + html brut normalisés
+    text = _norm(soup.get_text(" ", strip=True))
+    raw = _norm(event_html)
+
     sold_out_signals = [
         "toutes les places ont ete vendues",
         "vendues ou ajoutees en panier",
         "aucune place disponible",
         "complet",
     ]
-    for sig in sold_out_signals:
-        if _norm(sig) in text:
-            return "SOLD_OUT"
+    sold_out_signals = [_norm(s) for s in sold_out_signals]
 
-    # 2) Signaux AVAILABLE (achat possible)
+    if any(sig in text or sig in raw for sig in sold_out_signals):
+        return "SOLD_OUT"
+
     buy_signals = [
         "ajouter au panier",
         "choisir mes places",
@@ -70,11 +72,11 @@ def detect_event_status(event_html: str) -> str:
         "reservation",
         "valider",
     ]
-    for sig in buy_signals:
-        if _norm(sig) in text:
-            return "AVAILABLE"
+    buy_signals = [_norm(s) for s in buy_signals]
 
-    # 3) Sinon: on ne tranche pas
+    if any(sig in text or sig in raw for sig in buy_signals):
+        return "AVAILABLE"
+
     return "UNKNOWN"
 
 def fetch_html(url: str, timeout: int = 25) -> str:
