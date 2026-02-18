@@ -47,33 +47,16 @@ def detect_event_status(event_html: str) -> str:
     soup = BeautifulSoup(event_html, "lxml")
     text = _norm(soup.get_text(" ", strip=True))
 
-    # DEBUG (tu peux retirer après test)
     print("------ DEBUG EVENT TEXT START ------")
     print(text[:2000])
     print("------ DEBUG EVENT TEXT END ------")
 
-    # 1️⃣ Signal clair de disponibilité
-    if "places disponibles" in text:
+    # Si module de sélection visible → billets disponibles
+    if "plan de la salle" in text or "selection siege" in text:
         return "AVAILABLE"
 
-    # 2️⃣ Signal clair sold out
-    sold_out_signals = [
-        "toutes les places ont ete vendues",
-        "vendues ou ajoutees en panier",
-        "aucune place disponible",
-        "complet",
-    ]
-
-    for sig in sold_out_signals:
-        if sig in text:
-            return "SOLD_OUT"
-
-    # 3️⃣ Par sécurité : si pas de module de sélection visible
-    if "tribune" not in text and "bloc" not in text:
-        return "SOLD_OUT"
-
-    # 4️⃣ Sinon on considère ouvert
-    return "AVAILABLE"
+    # Sinon → sold out
+    return "SOLD_OUT"
     
 def fetch_html(url: str, timeout: int = 25) -> str:
     url_nocache = f"{url}{'&' if '?' in url else '?'}t={int(time.time())}"
