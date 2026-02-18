@@ -2,7 +2,7 @@ name: Hockey tickets monitor
 
 on:
   schedule:
-    - cron: "*/2 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -28,7 +28,16 @@ jobs:
           restore-keys: |
             state-
 
-      - name: Run monitor
+      - name: Run monitor (check 1)
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor_digitick.py
+
+      - name: Sleep 120s
+        run: sleep 120
+
+      - name: Run monitor (check 2)
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
