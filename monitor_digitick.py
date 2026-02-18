@@ -45,21 +45,41 @@ def _norm(s: str) -> str:
 
 def detect_event_status(event_html: str) -> str:
     """
-    SOLD_OUT si le mot 'vendu' apparaît dans la page (vendu/vendue/vendus/vendues).
-    Sinon AVAILABLE.
+    SOLD_OUT si le message 'toutes les places ont été vendues...' est présent.
+    AVAILABLE si on voit des éléments typiques d'achat (réserver / ajouter au panier / catégorie).
+    Sinon UNKNOWN (et on garde l'ancien statut côté state, si tu veux).
     """
     soup = BeautifulSoup(event_html, "lxml")
-
-    # Texte normalisé (minuscules + sans accents)
     text = _norm(soup.get_text(" ", strip=True))
+    raw = _norm(event_html)
 
-    # Si tu veux une preuve dans les logs GitHub Actions, dé-commente la ligne suivante :
-    # print("DEBUG contains 'vendu' ?", "vendu" in text)
-
-    if "vendu" in text:
+    # 1) Signal fort : message de sold-out
+    sold_out_signals = [
+        "toutes les places ont ete vendues",
+        "vendues ou ajoutees en panier",
+    ]
+    if any(sig in text or sig in raw for sig in sold_out_signals):
         return "SOLD_OUT"
 
-    return "AVAILABLE"
+    # 2) Signal positif : achat possible (mots très fréquents quand c'est ouvert)
+    buy_signals = [
+        "ajouter au panier",
+        "reserver",
+        "réserver",
+        "choisir mes places",
+        "selectionner",
+        "sélectionner",
+        "categorie",
+        "catégorie",
+        "tarif",
+        "quantite",
+        "quantité",
+    ]
+    if any(sig in text or sig in raw for sig in buy_signals):
+        return "AVAILABLE"
+
+    # 3) Si on ne sait pas, on ne tranche pas (évite les inversions)
+    return "UNKNOWN"
 
 
 def fetch_html(url: str, timeout: int = 25) -> str:
@@ -203,14 +223,20 @@ def main() -> None:
         elif old and old != status:
             send_telegram(format_status_change_message(match, old, status))
 
-        events[key] = {
-            "status": status,
-            "last_seen": now,
-            "href": href,
-            "title": match.get("title"),
-            "date": match.get("date"),
-            "hour": match.get("hour"),
-        }
+        # si UNKNOWN, on conserve l'ancien statut (anti faux-positifs)
+if status == "UNKNOWN" and old:
+    status_to_store = old
+else:
+    status_to_store = status
+
+events[key] = {
+    "status": status_to_store,
+    "last_seen": now,
+    "href": href,
+    "title": match.get("title"),
+    "date": match.get("date"),
+    "hour": match.get("hour"),
+}
 
         print(f"[OK] {match.get('title')} => {status}")
 
