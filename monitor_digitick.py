@@ -47,25 +47,32 @@ def detect_event_status(event_html: str) -> str:
     soup = BeautifulSoup(event_html, "lxml")
     text = _norm(soup.get_text(" ", strip=True))
 
-    # Si bouton panier ou mot clé d'achat → AVAILABLE
+    # 1) SOLD_OUT si on voit clairement le message
+    sold_out_signals = [
+        "toutes les places ont ete vendues",
+        "vendues ou ajoutees en panier",
+        "aucune place disponible",
+        "complet",
+    ]
+    for sig in sold_out_signals:
+        if _norm(sig) in text:
+            return "SOLD_OUT"
+
+    # 2) AVAILABLE si on voit des éléments d'achat
     buy_signals = [
         "ajouter au panier",
         "choisir mes places",
         "selectionner",
-        "catégorie",
         "categorie",
         "tarif",
-        "quantité",
         "quantite",
     ]
-
     for sig in buy_signals:
         if _norm(sig) in text:
             return "AVAILABLE"
 
-    # Sinon → probablement sold out
-    return "SOLD_OUT"
-
+    # 3) Sinon on ne tranche pas
+    return "UNKNOWN"
 
 def fetch_html(url: str, timeout: int = 25) -> str:
     url_nocache = f"{url}{'&' if '?' in url else '?'}t={int(time.time())}"
@@ -206,6 +213,11 @@ def main() -> None:
         if key not in seen_keys:
             send_telegram(format_new_match_message(match, status))
             seen_keys.add(key)
+        elif old and status != "UNKNOWN" and old != status:
+            send_telegram(format_status_change_message(match, old, status))
+
+        # stockage : si UNKNOWN, on garde l'ancien
+        status_to_store = old if (status == "UNKNOWN" and old) else status
 
         events[key] = {
             "status": status_to_store,
