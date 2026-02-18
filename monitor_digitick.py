@@ -45,49 +45,35 @@ def _norm(s: str) -> str:
 
 def detect_event_status(event_html: str) -> str:
     soup = BeautifulSoup(event_html, "lxml")
-
-    # Texte visible normalisé
     text = _norm(soup.get_text(" ", strip=True))
 
-    # 🔎 DEBUG — à laisser temporairement
+    # DEBUG (tu peux retirer après test)
     print("------ DEBUG EVENT TEXT START ------")
-    print(text[:3000])  # on limite à 3000 caractères pour ne pas exploser les logs
+    print(text[:2000])
     print("------ DEBUG EVENT TEXT END ------")
 
-    # 1️⃣ Signaux SOLD_OUT (priorité absolue)
+    # 1️⃣ Signal clair de disponibilité
+    if "places disponibles" in text:
+        return "AVAILABLE"
+
+    # 2️⃣ Signal clair sold out
     sold_out_signals = [
         "toutes les places ont ete vendues",
         "vendues ou ajoutees en panier",
         "aucune place disponible",
         "complet",
-        "plus de places",
     ]
 
     for sig in sold_out_signals:
-        if _norm(sig) in text:
+        if sig in text:
             return "SOLD_OUT"
 
-    # 2️⃣ Signaux AVAILABLE (achat possible)
-    buy_signals = [
-        "ajouter au panier",
-        "choisir mes places",
-        "selectionner",
-        "categorie",
-        "tarif",
-        "quantite",
-        "reserver",
-        "reservation",
-        "valider",
-        "placer au panier",
-        "continuer",
-    ]
+    # 3️⃣ Par sécurité : si pas de module de sélection visible
+    if "tribune" not in text and "bloc" not in text:
+        return "SOLD_OUT"
 
-    for sig in buy_signals:
-        if _norm(sig) in text:
-            return "AVAILABLE"
-
-    # 3️⃣ Sinon on ne tranche pas
-    return "UNKNOWN"
+    # 4️⃣ Sinon on considère ouvert
+    return "AVAILABLE"
     
 def fetch_html(url: str, timeout: int = 25) -> str:
     url_nocache = f"{url}{'&' if '?' in url else '?'}t={int(time.time())}"
