@@ -47,7 +47,7 @@ def detect_event_status(event_html: str) -> str:
     """
     SOLD_OUT si le message 'toutes les places ont été vendues...' est présent.
     AVAILABLE si on voit des éléments typiques d'achat (réserver / ajouter au panier / catégorie).
-    Sinon UNKNOWN (et on garde l'ancien statut côté state, si tu veux).
+    Sinon UNKNOWN.
     """
     soup = BeautifulSoup(event_html, "lxml")
     text = _norm(soup.get_text(" ", strip=True))
@@ -61,24 +61,19 @@ def detect_event_status(event_html: str) -> str:
     if any(sig in text or sig in raw for sig in sold_out_signals):
         return "SOLD_OUT"
 
-    # 2) Signal positif : achat possible (mots très fréquents quand c'est ouvert)
+    # 2) Signal positif : achat possible
     buy_signals = [
         "ajouter au panier",
         "reserver",
-        "réserver",
         "choisir mes places",
         "selectionner",
-        "sélectionner",
         "categorie",
-        "catégorie",
         "tarif",
         "quantite",
-        "quantité",
     ]
     if any(sig in text or sig in raw for sig in buy_signals):
         return "AVAILABLE"
 
-    # 3) Si on ne sait pas, on ne tranche pas (évite les inversions)
     return "UNKNOWN"
 
 
@@ -217,28 +212,26 @@ def main() -> None:
 
         old = events.get(key, {}).get("status")
 
+        # alertes
         if key not in seen_keys:
             send_telegram(format_new_match_message(match, status))
             seen_keys.add(key)
-        elif old and old != status:
+        elif old and status != "UNKNOWN" and old != status:
             send_telegram(format_status_change_message(match, old, status))
 
-        # si UNKNOWN, on conserve l'ancien statut (anti faux-positifs)
-if status == "UNKNOWN" and old:
-    status_to_store = old
-else:
-    status_to_store = status
+        # stockage : si UNKNOWN, on garde l'ancien
+        status_to_store = old if (status == "UNKNOWN" and old) else status
 
-events[key] = {
-    "status": status_to_store,
-    "last_seen": now,
-    "href": href,
-    "title": match.get("title"),
-    "date": match.get("date"),
-    "hour": match.get("hour"),
-}
+        events[key] = {
+            "status": status_to_store,
+            "last_seen": now,
+            "href": href,
+            "title": match.get("title"),
+            "date": match.get("date"),
+            "hour": match.get("hour"),
+        }
 
-        print(f"[OK] {match.get('title')} => {status}")
+        print(f"[OK] {match.get('title')} => {status_to_store}")
 
     state["seen_keys"] = sorted(seen_keys)
     state["events"] = events
