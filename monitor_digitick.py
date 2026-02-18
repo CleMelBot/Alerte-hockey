@@ -53,17 +53,16 @@ def _norm(s: str) -> str:
 
 def detect_event_status(event_html: str) -> str:
     """
-    Détermine AVAILABLE / SOLD_OUT en lisant le HTML de la page évènement.
-    Robuste aux accents, espaces bizarres, entités HTML.
+    SOLD_OUT si le mot 'vendues' apparaît dans la page.
+    Sinon AVAILABLE.
     """
     soup = BeautifulSoup(event_html, "lxml")
-    text = _norm(soup.get_text(" ", strip=True))
-    raw = _norm(event_html)
 
-    for phrase in SOLD_OUT_PHRASES:
-        p = _norm(phrase)
-        if p in text or p in raw:
-            return "SOLD_OUT"
+    # Texte normalisé (minuscules + sans accents)
+    text = _norm(soup.get_text(" ", strip=True))
+
+    if "vendues" in text:
+        return "SOLD_OUT"
 
     return "AVAILABLE"
 
