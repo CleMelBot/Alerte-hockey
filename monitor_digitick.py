@@ -26,21 +26,12 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 # Exemple liste: "ROUEN vs GRENOBLE - SLM - 19/02/2026"
 TITLE_RE = re.compile(
     r"^(?P<home>ROUEN)\s+vs\s+(?P<away>.+?)\s*-\s*SLM\s*-\s*(?P<date>\d{2}/\d{2}/\d{4})$",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # Exemple dans la carte: "Jeudi 19 Février 2026 - 20h00"
 DETAIL_RE = re.compile(r"(?P<time>\d{1,2}h\d{2})", re.IGNORECASE)
 
-# Phrases typiques "plus de places"
-SOLD_OUT_PHRASES = [
-    "toutes les places ont ete vendues",
-    "toutes les places ont ete vendues ou ajoutees en panier",
-    "vendues ou ajoutees en panier",
-    "ajoutees en panier",
-    "aucune place disponible",
-    "complet",
-]
 
 def _norm(s: str) -> str:
     # Decode entities, lower, collapse spaces
@@ -51,9 +42,10 @@ def _norm(s: str) -> str:
     s = "".join(ch for ch in s if not unicodedata.combining(ch))
     return s
 
+
 def detect_event_status(event_html: str) -> str:
     """
-    SOLD_OUT si le mot 'vendues' apparaît dans la page.
+    SOLD_OUT si le mot 'vendu' apparaît dans la page (vendu/vendue/vendus/vendues).
     Sinon AVAILABLE.
     """
     soup = BeautifulSoup(event_html, "lxml")
@@ -61,10 +53,14 @@ def detect_event_status(event_html: str) -> str:
     # Texte normalisé (minuscules + sans accents)
     text = _norm(soup.get_text(" ", strip=True))
 
-    if "vendues" in text:
+    # Si tu veux une preuve dans les logs GitHub Actions, dé-commente la ligne suivante :
+    # print("DEBUG contains 'vendu' ?", "vendu" in text)
+
+    if "vendu" in text:
         return "SOLD_OUT"
 
     return "AVAILABLE"
+
 
 def fetch_html(url: str, timeout: int = 25) -> str:
     url_nocache = f"{url}{'&' if '?' in url else '?'}t={int(time.time())}"
@@ -72,11 +68,13 @@ def fetch_html(url: str, timeout: int = 25) -> str:
     r.raise_for_status()
     return r.content.decode(r.encoding or "utf-8", errors="replace")
 
+
 def normalize_href(href: str) -> str:
     href = (href or "").strip()
     if href.startswith("/"):
         return "https://web.digitick.com" + href
     return href
+
 
 def send_telegram(message: str) -> None:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -89,6 +87,7 @@ def send_telegram(message: str) -> None:
     except Exception as e:
         print(f"[WARN] Envoi Telegram échoué: {e}")
 
+
 def load_state() -> Dict:
     if not STATE_FILE.exists():
         return {"seen_keys": [], "events": {}}
@@ -97,11 +96,13 @@ def load_state() -> Dict:
     except Exception:
         return {"seen_keys": [], "events": {}}
 
+
 def save_state(state: Dict) -> None:
     STATE_FILE.write_text(
         json.dumps(state, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
 
 def extract_matches_from_list(html: str) -> List[Dict]:
     soup = BeautifulSoup(html, "lxml")
@@ -126,20 +127,23 @@ def extract_matches_from_list(html: str) -> List[Dict]:
         key_src = f"{title}|{href}"
         key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()
 
-        matches.append({
-            "key": key,
-            "title": title,
-            "home": home,
-            "away": away,
-            "date": date,
-            "hour": hour,
-            "href": href,
-        })
+        matches.append(
+            {
+                "key": key,
+                "title": title,
+                "home": home,
+                "away": away,
+                "date": date,
+                "hour": hour,
+                "href": href,
+            }
+        )
 
     uniq = {}
     for it in matches:
         uniq[it["key"]] = it
     return list(uniq.values())
+
 
 def format_new_match_message(match: Dict, status: str) -> str:
     lines = ["🏒 Nouveau match Dragons détecté !"]
@@ -152,6 +156,7 @@ def format_new_match_message(match: Dict, status: str) -> str:
     lines.append(f"🔗 {match['href']}")
     return "\n".join(lines)
 
+
 def format_status_change_message(match: Dict, old_status: str, new_status: str) -> str:
     emoji = "✅" if new_status == "AVAILABLE" else "⛔️"
     lines = [f"{emoji} Changement de statut billetterie !"]
@@ -163,6 +168,7 @@ def format_status_change_message(match: Dict, old_status: str, new_status: str) 
     lines.append(f"🔁 {old_status} → {new_status}")
     lines.append(f"🔗 {match['href']}")
     return "\n".join(lines)
+
 
 def main() -> None:
     now = int(time.time())
@@ -211,6 +217,7 @@ def main() -> None:
     state["seen_keys"] = sorted(seen_keys)
     state["events"] = events
     save_state(state)
+
 
 if __name__ == "__main__":
     main()
