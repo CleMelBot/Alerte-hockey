@@ -45,38 +45,27 @@ def _norm(s: str) -> str:
 
 def detect_event_status(event_html: str) -> str:
     soup = BeautifulSoup(event_html, "lxml")
-
-    # texte visible + html brut normalisés
     text = _norm(soup.get_text(" ", strip=True))
-    raw = _norm(event_html)
 
+    # 🔴 1) Si message sold out explicite → SOLD_OUT direct
     sold_out_signals = [
         "toutes les places ont ete vendues",
         "vendues ou ajoutees en panier",
+        "plus de places disponibles",
         "aucune place disponible",
+        "billetterie fermee",
         "complet",
     ]
-    sold_out_signals = [_norm(s) for s in sold_out_signals]
 
-    if any(sig in text or sig in raw for sig in sold_out_signals):
-        return "SOLD_OUT"
+    for sig in sold_out_signals:
+        if _norm(sig) in text:
+            return "SOLD_OUT"
 
-    buy_signals = [
-        "ajouter au panier",
-        "choisir mes places",
-        "selectionner",
-        "categorie",
-        "tarif",
-        "quantite",
-        "reserver",
-        "reservation",
-        "valider",
-    ]
-    buy_signals = [_norm(s) for s in buy_signals]
-
-    if any(sig in text or sig in raw for sig in buy_signals):
+    # 🟢 2) Sinon si bouton achat visible → AVAILABLE
+    if "ajouter au panier" in text:
         return "AVAILABLE"
 
+    # ⚪ 3) Sinon on ne tranche pas
     return "UNKNOWN"
 
 def fetch_html(url: str, timeout: int = 25) -> str:
