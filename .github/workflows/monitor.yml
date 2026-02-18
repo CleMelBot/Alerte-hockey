@@ -2,7 +2,7 @@ name: Hockey tickets monitor
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/2 * * * *"
   workflow_dispatch:
 
 jobs:
