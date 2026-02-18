@@ -206,11 +206,6 @@ def main() -> None:
         if key not in seen_keys:
             send_telegram(format_new_match_message(match, status))
             seen_keys.add(key)
-        elif old and status != "UNKNOWN" and old != status:
-            send_telegram(format_status_change_message(match, old, status))
-
-        # stockage : si UNKNOWN, on garde l'ancien
-        status_to_store = old if (status == "UNKNOWN" and old) else status
 
         events[key] = {
             "status": status_to_store,
