@@ -234,7 +234,7 @@ def main() -> None:
         print(f"[ERROR] Run failed: {e}")
 
         # n'alerter que sur le 10e échec consécutif
-        if failures == 10:
+        if failures % 10 == 0:
             send_telegram(
                 "⚠️ Hockey tickets monitor: 10 échecs d’affilée.\n"
                 "Va voir GitHub Actions pour le détail du log."
