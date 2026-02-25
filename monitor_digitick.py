@@ -47,6 +47,7 @@ def detect_event_status(event_html: str) -> str:
     soup = BeautifulSoup(event_html, "lxml")
     text = _norm(soup.get_text(" ", strip=True))
 
+    # DEBUG (tu peux supprimer ces 3 lignes si tu veux des logs plus courts)
     print("------ DEBUG EVENT TEXT START ------")
     print(text[:2000])
     print("------ DEBUG EVENT TEXT END ------")
@@ -57,7 +58,8 @@ def detect_event_status(event_html: str) -> str:
 
     # Sinon → sold out
     return "SOLD_OUT"
-    
+
+
 def fetch_html(url: str, timeout: int = 25) -> str:
     url_nocache = f"{url}{'&' if '?' in url else '?'}t={int(time.time())}"
     r = requests.get(url_nocache, headers=HEADERS, timeout=timeout)
@@ -92,7 +94,7 @@ def load_state() -> Dict:
     except Exception:
         state = {"seen_keys": [], "events": {}, "consecutive_failures": 0}
 
-    # rétro-compat : si l'ancienne version du json n'a pas la clé
+    # rétro-compat
     if "consecutive_failures" not in state:
         state["consecutive_failures"] = 0
     if "seen_keys" not in state:
@@ -179,7 +181,6 @@ def format_status_change_message(match: Dict, old_status: str, new_status: str) 
 def main() -> None:
     now = int(time.time())
 
-    # charge l'état dès le début (pour lire/écrire le compteur)
     state = load_state()
     seen_keys = set(state.get("seen_keys", []))
     events = state.get("events", {}) or {}
@@ -191,7 +192,6 @@ def main() -> None:
 
         if not matches:
             print("Aucun match détecté sur la page liste.")
-            # on considère ça comme une réussite technique (pas une erreur)
             state["consecutive_failures"] = 0
             save_state(state)
             return
@@ -205,7 +205,6 @@ def main() -> None:
 
             old = events.get(key, {}).get("status")
 
-            # alertes
             if key not in seen_keys:
                 send_telegram(format_new_match_message(match, status))
                 seen_keys.add(key)
@@ -223,30 +222,27 @@ def main() -> None:
 
             print(f"[OK] {match.get('title')} => {status}")
 
-        # si on arrive ici : run OK -> reset compteur
+        # run OK -> reset compteur
         state["consecutive_failures"] = 0
 
     except Exception as e:
-        # run KO -> incrément compteur
         failures += 1
         state["consecutive_failures"] = failures
 
         print(f"[ERROR] Run failed: {e}")
 
-        # n'alerter que sur le 10e échec consécutif
+        # alerte au 10e, 20e, 30e...
         if failures % 10 == 0:
             send_telegram(
-                "⚠️ Hockey tickets monitor: 10 échecs d’affilée.\n"
+                f"⚠️ Hockey tickets monitor: {failures} échecs d’affilée.\n"
                 "Va voir GitHub Actions pour le détail du log."
             )
 
-        # IMPORTANT : on sauvegarde quand même l'état (compteur + ce qu'on avait)
         state["seen_keys"] = sorted(seen_keys)
         state["events"] = events
         save_state(state)
         return
 
-    # sauvegarde “normale”
     state["seen_keys"] = sorted(seen_keys)
     state["events"] = events
     save_state(state)
