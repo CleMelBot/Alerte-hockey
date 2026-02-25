@@ -5,6 +5,11 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
+# Empêche 2 exécutions simultanées (évite les conflits git sur state.json)
+concurrency:
+  group: hockey-monitor
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -17,6 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true
+          fetch-depth: 0  # important pour pouvoir pull --rebase proprement
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -44,10 +50,16 @@ jobs:
 
             if git diff --cached --quiet; then
               echo "No state changes to commit."
-            else
-              git commit -m "Update state.json"
-              git push
+              exit 0
             fi
+
+            # On commit, puis on essaie de se rebaser sur le remote (au cas où)
+            git commit -m "Update state.json" || true
+
+            # On tente de récupérer les changements distants puis push.
+            # IMPORTANT: ne jamais faire échouer le workflow à cause d’un conflit de push.
+            git pull --rebase origin main || true
+            git push origin main || true
           else
             echo "state.json not found, nothing to commit."
           fi
