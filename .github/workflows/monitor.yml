@@ -8,7 +8,7 @@ on:
 # Empêche 2 exécutions simultanées (évite les conflits git sur state.json)
 concurrency:
   group: hockey-monitor
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
