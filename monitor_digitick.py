@@ -86,11 +86,21 @@ def send_telegram(message: str) -> None:
 
 def load_state() -> Dict:
     if not STATE_FILE.exists():
-        return {"seen_keys": [], "events": {}}
+        return {"seen_keys": [], "events": {}, "consecutive_failures": 0}
     try:
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception:
-        return {"seen_keys": [], "events": {}}
+        state = {"seen_keys": [], "events": {}, "consecutive_failures": 0}
+
+    # rétro-compat : si l'ancienne version du json n'a pas la clé
+    if "consecutive_failures" not in state:
+        state["consecutive_failures"] = 0
+    if "seen_keys" not in state:
+        state["seen_keys"] = []
+    if "events" not in state:
+        state["events"] = {}
+
+    return state
 
 
 def save_state(state: Dict) -> None:
@@ -169,51 +179,74 @@ def format_status_change_message(match: Dict, old_status: str, new_status: str) 
 def main() -> None:
     now = int(time.time())
 
-    list_html = fetch_html(LIST_URL)
-    matches = extract_matches_from_list(list_html)
-
+    # charge l'état dès le début (pour lire/écrire le compteur)
     state = load_state()
     seen_keys = set(state.get("seen_keys", []))
     events = state.get("events", {}) or {}
+    failures = int(state.get("consecutive_failures", 0))
 
-    if not matches:
-        print("Aucun match détecté sur la page liste.")
-        return
+    try:
+        list_html = fetch_html(LIST_URL)
+        matches = extract_matches_from_list(list_html)
 
-    for match in matches:
-        key = match["key"]
-        href = match["href"]
+        if not matches:
+            print("Aucun match détecté sur la page liste.")
+            # on considère ça comme une réussite technique (pas une erreur)
+            state["consecutive_failures"] = 0
+            save_state(state)
+            return
 
-        try:
+        for match in matches:
+            key = match["key"]
+            href = match["href"]
+
             event_html = fetch_html(href)
             status = detect_event_status(event_html)
-        except Exception as e:
-            print(f"[WARN] Impossible de lire l'évènement {href} : {e}")
-            continue
 
-        old = events.get(key, {}).get("status")
+            old = events.get(key, {}).get("status")
 
-        # alertes
-        if key not in seen_keys:
-            send_telegram(format_new_match_message(match, status))
-            seen_keys.add(key)
-        elif old and status != "UNKNOWN" and old != status:
-            send_telegram(format_status_change_message(match, old, status))
+            # alertes
+            if key not in seen_keys:
+                send_telegram(format_new_match_message(match, status))
+                seen_keys.add(key)
+            elif old and old != status:
+                send_telegram(format_status_change_message(match, old, status))
 
-        # stockage : si UNKNOWN, on garde l'ancien
-        status_to_store = old if (status == "UNKNOWN" and old) else status
+            events[key] = {
+                "status": status,
+                "last_seen": now,
+                "href": href,
+                "title": match.get("title"),
+                "date": match.get("date"),
+                "hour": match.get("hour"),
+            }
 
-        events[key] = {
-            "status": status_to_store,
-            "last_seen": now,
-            "href": href,
-            "title": match.get("title"),
-            "date": match.get("date"),
-            "hour": match.get("hour"),
-        }
+            print(f"[OK] {match.get('title')} => {status}")
 
-        print(f"[OK] {match.get('title')} => {status_to_store}")
+        # si on arrive ici : run OK -> reset compteur
+        state["consecutive_failures"] = 0
 
+    except Exception as e:
+        # run KO -> incrément compteur
+        failures += 1
+        state["consecutive_failures"] = failures
+
+        print(f"[ERROR] Run failed: {e}")
+
+        # n'alerter que sur le 10e échec consécutif
+        if failures == 10:
+            send_telegram(
+                "⚠️ Hockey tickets monitor: 10 échecs d’affilée.\n"
+                "Va voir GitHub Actions pour le détail du log."
+            )
+
+        # IMPORTANT : on sauvegarde quand même l'état (compteur + ce qu'on avait)
+        state["seen_keys"] = sorted(seen_keys)
+        state["events"] = events
+        save_state(state)
+        return
+
+    # sauvegarde “normale”
     state["seen_keys"] = sorted(seen_keys)
     state["events"] = events
     save_state(state)
