@@ -1,8 +1,6 @@
 name: Hockey tickets monitor
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 # Empêche 2 exécutions simultanées (évite les conflits git sur state.json)
