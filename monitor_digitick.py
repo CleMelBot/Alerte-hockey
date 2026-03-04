@@ -28,7 +28,10 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 DATE_ANY_RE = re.compile(r"(\d{2}[/-]\d{2}[/-]\d{4})")
 
 # "ROUEN vs XXXXX" n'importe où dans le titre (playoffs inclus)
-VS_ANY_RE = re.compile(r"\b(ROUEN)\s+vs\s+(.+?)\b", re.IGNORECASE)
+VS_ANY_RE = re.compile(
+    r"\b(ROUEN)\s+vs\s+(.+?)(?=\s+\d{2}[/-]\d{2}[/-]\d{4}\b|\s+-|\s+@|$)",
+    re.IGNORECASE,
+)
 
 # Exemple dans la carte: "Jeudi 19 Février 2026 - 20h00"
 DETAIL_RE = re.compile(r"(?P<time>\d{1,2}h\d{2})", re.IGNORECASE)
@@ -57,9 +60,12 @@ def detect_event_status(event_html: str) -> str:
     if "plan de la salle" in text or "selection siege" in text:
         return "AVAILABLE"
 
+    # Pages où on voit le gros bouton "RÉSERVER"
+    if "reserver" in text:
+        return "AVAILABLE"
+
     # Sinon → sold out
     return "SOLD_OUT"
-
 
 def fetch_html(url: str, timeout: int = 25) -> str:
     url_nocache = f"{url}{'&' if '?' in url else '?'}t={int(time.time())}"
