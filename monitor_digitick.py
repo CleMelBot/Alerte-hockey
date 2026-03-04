@@ -24,10 +24,11 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 # Exemple liste: "ROUEN vs GRENOBLE - SLM - 19/02/2026"
-TITLE_RE = re.compile(
-    r"^(?P<home>ROUEN)\s+vs\s+(?P<away>.+?)\s*-\s*SLM\s*-\s*(?P<date>\d{2}/\d{2}/\d{4})$",
-    re.IGNORECASE,
-)
+# Date n'importe où (13/03/2026 ou 13-03-2026)
+DATE_ANY_RE = re.compile(r"(\d{2}[/-]\d{2}[/-]\d{4})")
+
+# "ROUEN vs XXXXX" n'importe où dans le titre (playoffs inclus)
+VS_ANY_RE = re.compile(r"\b(ROUEN)\s+vs\s+(.+?)\b", re.IGNORECASE)
 
 # Exemple dans la carte: "Jeudi 19 Février 2026 - 20h00"
 DETAIL_RE = re.compile(r"(?P<time>\d{1,2}h\d{2})", re.IGNORECASE)
@@ -117,28 +118,40 @@ def extract_matches_from_list(html: str) -> List[Dict]:
     matches: List[Dict] = []
 
     for a in soup.find_all("a", href=True):
-        title = " ".join(a.get_text(" ", strip=True).split())
-        m = TITLE_RE.match(title)
-        if not m:
+        title_raw = " ".join(a.get_text(" ", strip=True).split())
+        title_norm = _norm(title_raw)
+
+        # On ne garde que ce qui contient "rouen vs ..."
+        mvs = VS_ANY_RE.search(title_raw)
+        if not mvs:
             continue
+
+        home = mvs.group(1).upper().strip()  # ROUEN
+        away = mvs.group(2).strip().upper()  # AMIENS / ANGERS / etc.
+
+        # On récupère une date où qu'elle soit dans le titre
+        d = DATE_ANY_RE.search(title_raw)
+        if not d:
+            # Si pas de date dans le texte du lien, on tente le bloc parent
+            parent_text = " ".join(a.parent.get_text(" ", strip=True).split()) if a.parent else ""
+            d = DATE_ANY_RE.search(parent_text)
+        date = d.group(1).replace("-", "/") if d else None
 
         href = normalize_href(a.get("href", ""))
 
+        # Heure éventuelle (dans le bloc autour du lien)
         block_text = " ".join(a.parent.get_text(" ", strip=True).split()) if a.parent else ""
         tmatch = DETAIL_RE.search(block_text)
         hour = tmatch.group("time") if tmatch else None
 
-        home = m.group("home").upper()
-        away = m.group("away").strip().upper()
-        date = m.group("date")
-
-        key_src = f"{title}|{href}"
+        # Clé stable
+        key_src = f"{title_raw}|{href}"
         key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()
 
         matches.append(
             {
                 "key": key,
-                "title": title,
+                "title": title_raw,
                 "home": home,
                 "away": away,
                 "date": date,
@@ -147,11 +160,11 @@ def extract_matches_from_list(html: str) -> List[Dict]:
             }
         )
 
+    # dédoublonnage
     uniq = {}
     for it in matches:
         uniq[it["key"]] = it
     return list(uniq.values())
-
 
 def format_new_match_message(match: Dict, status: str) -> str:
     lines = ["🏒 Nouveau match Dragons détecté !"]
