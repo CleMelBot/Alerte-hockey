@@ -233,7 +233,10 @@ def main() -> None:
 
     try:
         list_html = fetch_html(LIST_URL)
-        matches = extract_matches_from_list(list_html)
+
+debug_list_page(list_html)
+
+matches = extract_matches_from_list(list_html)
 
         if not matches:
             print("Aucun match détecté sur la page liste.")
