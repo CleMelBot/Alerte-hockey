@@ -196,6 +196,32 @@ def format_status_change_message(match: Dict, old_status: str, new_status: str) 
     lines.append(f"🔗 {match['href']}")
     return "\n".join(lines)
 
+def debug_list_page(html: str) -> None:
+    soup = BeautifulSoup(html, "lxml")
+
+    print("========== DEBUG LIST PAGE : LINKS START ==========")
+    for i, a in enumerate(soup.find_all("a", href=True), start=1):
+        title = " ".join(a.get_text(" ", strip=True).split())
+        href = normalize_href(a.get("href", ""))
+        if title:
+            print(f"[A {i}] TITLE: {title}")
+            print(f"[A {i}] HREF : {href}")
+    print("========== DEBUG LIST PAGE : LINKS END ==========")
+
+    print("========== DEBUG LIST PAGE : BLOCKS WITH 'ROUEN' START ==========")
+    seen = set()
+    for tag in soup.find_all(["div", "section", "article", "li"]):
+        text = " ".join(tag.get_text(" ", strip=True).split())
+        if not text:
+            continue
+        norm = _norm(text)
+        if "rouen" in norm and len(text) > 30:
+            short = text[:500]
+            if short not in seen:
+                seen.add(short)
+                print(short)
+                print("-----")
+    print("========== DEBUG LIST PAGE : BLOCKS WITH 'ROUEN' END ==========")
 
 def main() -> None:
     now = int(time.time())
