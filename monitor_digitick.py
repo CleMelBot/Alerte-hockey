@@ -223,6 +223,7 @@ def debug_list_page(html: str) -> None:
                 print("-----")
     print("========== DEBUG LIST PAGE : BLOCKS WITH 'ROUEN' END ==========")
 
+
 def main() -> None:
     now = int(time.time())
 
@@ -234,9 +235,9 @@ def main() -> None:
     try:
         list_html = fetch_html(LIST_URL)
 
-debug_list_page(list_html)
+        debug_list_page(list_html)
 
-matches = extract_matches_from_list(list_html)
+        matches = extract_matches_from_list(list_html)
 
         if not matches:
             print("Aucun match détecté sur la page liste.")
@@ -294,7 +295,6 @@ matches = extract_matches_from_list(list_html)
     state["seen_keys"] = sorted(seen_keys)
     state["events"] = events
     save_state(state)
-
 
 if __name__ == "__main__":
     main()
