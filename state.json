@@ -1,6 +1,8 @@
 {
   "seen_keys": [
     "09aa8a66e8044c1876fab8766da1231258088a29",
+    "0afe388c03f9a13525b588548b706ff4c21c2943",
+    "226e73b9bc3d076ef339d0aceb803c45d84d90cf",
     "2307c4e6e928c1ee5717c1be8657780bdba01550",
     "76fe3f99f75a755c6f34494184124fdef9c63991",
     "8e594d3e131ea381eed25f7f23e6006354ce26e7",
@@ -45,6 +47,22 @@
       "href": "https://web.digitick.com/play-off-1-4-de-finale-m-2-rouen-vs-amiens-14-03-2026-sport-hockey-css5-rhe76mobile-pg51-ei1100413.html",
       "title": "PLAY OFF 1/4 DE FINALE M.2 ROUEN vs AMIENS 14/03/2026",
       "date": "14/03/2026",
+      "hour": "20h00"
+    },
+    "0afe388c03f9a13525b588548b706ff4c21c2943": {
+      "status": "AVAILABLE",
+      "last_seen": 1774306635,
+      "href": "https://web.digitick.com/play-off-1-2-de-finale-m-1-rouen-vs-bordeaux-27-03-2026-sport-hockey-css5-rhe76mobile-pg51-ei1103923.html",
+      "title": "PLAY OFF 1/2 DE FINALE M.1 ROUEN vs BORDEAUX 27/03/2026",
+      "date": "27/03/2026",
+      "hour": "20h00"
+    },
+    "226e73b9bc3d076ef339d0aceb803c45d84d90cf": {
+      "status": "AVAILABLE",
+      "last_seen": 1774306635,
+      "href": "https://web.digitick.com/play-off-1-2-de-finale-m-2-rouen-vs-bordeaux-28-03-2026-sport-hockey-css5-rhe76mobile-pg51-ei1104215.html",
+      "title": "PLAY OFF 1/2 DE FINALE M.2 ROUEN vs BORDEAUX 28/03/2026",
+      "date": "28/03/2026",
       "hour": "20h00"
     }
   },
