@@ -1,1 +1,15 @@
-{"events": {}, "consecutive_failures": 0}
+{
+  "events": {
+    "3": {
+      "available": true,
+      "title": "Rouen vs Cergy-Pontoise",
+      "when": "01/09/2026 20h00"
+    },
+    "4": {
+      "available": true,
+      "title": "Rouen vs Dusseldorf",
+      "when": "05/09/2026 19h30"
+    }
+  },
+  "consecutive_failures": 0
+}
