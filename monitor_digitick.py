@@ -2,14 +2,15 @@
 """
 Monitoring billetterie Rouen Hockey Elite 76 (nouveau site Next.js).
 
-Remplace monitor_digitick.py. Le club a migré vers billetterie.rouenhockeyelite76.com,
-une app Next.js qui rend ses données côté serveur (SSR). La page /fr renvoie donc,
-dans son HTML brut, un flux JSON contenant chaque évènement à venir avec le champ
-`hasPublicOffersAvailable` :
+La page /fr renvoie, dans son HTML brut (SSR), un flux JSON contenant chaque
+évènement à venir avec le champ `hasPublicOffersAvailable` :
     - True  -> billetterie ouverte  (bouton "Réserver" orange)
     - False -> pas (ou plus) ouverte (bouton grisé)
 
-Le passage False -> True = ouverture des ventes. C'est ce qu'on veut détecter.
+Le passage False -> True = ouverture des ventes. C'est ce qu'on détecte.
+
+En fin de run réussi, le script "ping" healthchecks.io (dead man's switch) :
+si healthchecks ne reçoit plus de ping, il alerte (le bot est en panne).
 
 Dépendances : requests
 """
@@ -29,13 +30,17 @@ BASE_URL = "https://billetterie.rouenhockeyelite76.com"
 LIST_URL = BASE_URL + "/fr"          # page "Évènement(s) à venir" (SSR)
 STATE_FILE = "state.json"
 
+# Dead man's switch : URL de ping healthchecks.io.
+# Pingé uniquement quand le run réussit. Pas de secret : au pire quelqu'un
+# ferait croire que le bot va bien.
+HEALTHCHECK_URL = "https://hc-ping.com/65ae6222-4000-4f9b-8fd9-22b2a92c2980"
+
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 PARIS = timezone(timedelta(hours=2))  # suffisant pour l'affichage ; ajuste l'hiver si besoin
 
 HEADERS = {
-    # User-Agent réaliste : sans ça, certains fronts renvoient une page vide / un blocage.
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -109,7 +114,6 @@ def extract_events(html: str) -> dict:
     déséchappe chaque fragment et en extrait les évènements.
     Retourne {event_id: event_dict}."""
     events = {}
-    # Capture le contenu (chaîne échappée) de chaque push RSC.
     pattern = re.compile(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', re.DOTALL)
     for m in pattern.finditer(html):
         try:
@@ -147,7 +151,7 @@ def format_event(ev: dict) -> dict:
     }
 
 
-# --- Telegram ----------------------------------------------------------------
+# --- Telegram + healthcheck --------------------------------------------------
 
 def send_telegram(message: str) -> None:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -163,6 +167,17 @@ def send_telegram(message: str) -> None:
         )
     except Exception as e:
         print(f"[WARN] Envoi Telegram échoué: {e}")
+
+
+def ping_healthcheck() -> None:
+    """Signale à healthchecks.io que le run s'est bien terminé (dead man's switch)."""
+    if not HEALTHCHECK_URL:
+        return
+    try:
+        requests.get(HEALTHCHECK_URL, timeout=10)
+    except Exception as e:
+        # Un ping raté ne doit jamais faire échouer le run.
+        print(f"[WARN] Ping healthcheck échoué: {e}")
 
 
 # --- State -------------------------------------------------------------------
@@ -186,7 +201,7 @@ def save_state(state: dict) -> None:
 
 def main() -> int:
     state = load_state()
-    known = state.get("events", {})  # {str(id): {"available": bool, "title": ...}}
+    known = state.get("events", {})
 
     try:
         html = fetch_html(LIST_URL)
@@ -201,14 +216,11 @@ def main() -> int:
         state["consecutive_failures"] = failures
         save_state(state)
         print(f"[ERREUR] {e}  (échec #{failures})")
-        if failures % 10 == 0:
-            send_telegram(
-                f"⚠️ Monitor billetterie RHE76 : {failures} échecs d'affilée.\n"
-                "Va voir GitHub Actions pour le détail du log."
-            )
+        # NB : on NE ping PAS healthcheck en cas d'échec -> c'est l'absence de
+        # ping qui déclenchera l'alerte côté healthchecks.io.
         return 1
 
-    # Succès -> on remet le compteur d'échecs à zéro
+    # Succès -> compteur d'échecs à zéro
     state["consecutive_failures"] = 0
 
     for ev_id, ev in raw_events.items():
@@ -217,7 +229,6 @@ def main() -> int:
         old = known.get(key)
 
         if old is None:
-            # Nouveau match découvert
             statut = "OUVERTE ✅" if e["available"] else "pas encore ouverte ⏳"
             send_telegram(
                 "🏒 Nouveau match détecté !\n"
@@ -228,7 +239,6 @@ def main() -> int:
                 f"🔗 {e['url']}"
             )
         elif old.get("available") != e["available"]:
-            # Changement d'état de la billetterie
             if e["available"]:
                 send_telegram(
                     "✅ Billetterie OUVERTE !\n"
@@ -249,6 +259,9 @@ def main() -> int:
     state["events"] = known
     save_state(state)
     print(f"OK - {len(raw_events)} évènement(s) vérifié(s).")
+
+    # Run réussi : on signale qu'on est vivant.
+    ping_healthcheck()
     return 0
 
 
