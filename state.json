@@ -9,6 +9,11 @@
       "available": true,
       "title": "Rouen vs Dusseldorf",
       "when": "05/09/2026 19h30"
+    },
+    "5": {
+      "available": false,
+      "title": "Rouen vs Grenoble",
+      "when": "18/09/2026 20h00"
     }
   },
   "consecutive_failures": 0
