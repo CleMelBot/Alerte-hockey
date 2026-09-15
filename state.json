@@ -11,12 +11,12 @@
       "when": "05/09/2026 19h30"
     },
     "5": {
-      "available": false,
+      "available": true,
       "title": "Rouen vs Grenoble",
       "when": "18/09/2026 20h30"
     },
     "6": {
-      "available": false,
+      "available": true,
       "title": "Rouen vs Gap",
       "when": "25/09/2026 20h00"
     }
