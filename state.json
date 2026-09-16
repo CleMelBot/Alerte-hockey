@@ -19,6 +19,11 @@
       "available": true,
       "title": "Rouen vs Gap",
       "when": "25/09/2026 20h00"
+    },
+    "7": {
+      "available": false,
+      "title": "Rouen vs Amiens",
+      "when": "29/09/2026 20h00"
     }
   },
   "consecutive_failures": 0
