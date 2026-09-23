@@ -31,7 +31,7 @@
       "when": "04/10/2026 18h00"
     },
     "9": {
-      "available": false,
+      "available": true,
       "title": "Rouen vs Chamonix Mont-Blanc",
       "when": "09/10/2026 20h00"
     }
