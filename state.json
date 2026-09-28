@@ -34,6 +34,11 @@
       "available": true,
       "title": "Rouen vs Chamonix Mont-Blanc",
       "when": "09/10/2026 20h00"
+    },
+    "10": {
+      "available": false,
+      "title": "Rouen vs Angers",
+      "when": "12/10/2026 20h30"
     }
   },
   "consecutive_failures": 0
