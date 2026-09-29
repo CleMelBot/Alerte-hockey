@@ -44,6 +44,11 @@
       "available": false,
       "title": "Rouen vs Marseille",
       "when": "15/10/2026 20h00"
+    },
+    "12": {
+      "available": false,
+      "title": "Rouen vs Angers",
+      "when": "23/10/2026 20h30"
     }
   },
   "consecutive_failures": 0
