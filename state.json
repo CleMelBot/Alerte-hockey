@@ -41,7 +41,7 @@
       "when": "12/10/2026 20h00"
     },
     "11": {
-      "available": false,
+      "available": true,
       "title": "Rouen vs Marseille",
       "when": "15/10/2026 20h00"
     },
