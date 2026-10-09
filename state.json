@@ -49,6 +49,11 @@
       "available": false,
       "title": "Rouen vs Angers",
       "when": "23/10/2026 20h30"
+    },
+    "13": {
+      "available": false,
+      "title": "Rouen vs Cergy-Pontoise",
+      "when": "27/10/2026 21h00"
     }
   },
   "consecutive_failures": 0
