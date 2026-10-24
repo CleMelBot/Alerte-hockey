@@ -59,6 +59,11 @@
       "available": true,
       "title": "Rouen vs Chamonix Mont-Blanc",
       "when": "30/10/2026 21h00"
+    },
+    "15": {
+      "available": false,
+      "title": "Mogo vs Katowice",
+      "when": "13/11/2026 16h00"
     }
   },
   "consecutive_failures": 0
