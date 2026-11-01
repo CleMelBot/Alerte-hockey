@@ -1,45 +1,27 @@
 #!/usr/bin/env python3
-"""
-Monitoring billetterie Rouen Hockey Elite 76 (nouveau site Next.js).
+"""Surveillance de la billetterie Rouen Hockey Elite 76 (Next.js SSR)."""
 
-La page /fr renvoie, dans son HTML brut (SSR), un flux JSON contenant chaque
-évènement à venir avec le champ `hasPublicOffersAvailable` :
-    - True  -> billetterie ouverte  (bouton "Réserver" orange)
-    - False -> pas (ou plus) ouverte (bouton grisé)
-
-Le passage False -> True = ouverture des ventes. C'est ce qu'on détecte.
-
-En fin de run réussi, le script "ping" healthchecks.io (dead man's switch) :
-si healthchecks ne reçoit plus de ping, il alerte (le bot est en panne).
-
-Dépendances : requests
-"""
-
+import html as html_lib
+import json
 import os
 import re
 import sys
-import json
-import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
-# --- Configuration -----------------------------------------------------------
-
 BASE_URL = "https://billetterie.rouenhockeyelite76.com"
-LIST_URL = BASE_URL + "/fr"          # page "Évènement(s) à venir" (SSR)
-STATE_FILE = "state.json"
-
-# Dead man's switch : URL de ping healthchecks.io.
-# Pingé uniquement quand le run réussit. Pas de secret : au pire quelqu'un
-# ferait croire que le bot va bien.
-HEALTHCHECK_URL = "https://hc-ping.com/65ae6222-4000-4f9b-8fd9-22b2a92c2980"
-
+LIST_URL = BASE_URL + "/fr"
+STATE_FILE = Path("state.json")
+HEALTHCHECK_URL = os.environ.get(
+    "HEALTHCHECK_URL",
+    "https://hc-ping.com/65ae6222-4000-4f9b-8fd9-22b2a92c2980",
+)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
-
-PARIS = timezone(timedelta(hours=2))  # suffisant pour l'affichage ; ajuste l'hiver si besoin
-
+PARIS = ZoneInfo("Europe/Paris")
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -48,38 +30,38 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "fr-FR,fr;q=0.9",
 }
+EMPTY_MESSAGE_RE = re.compile(
+    r"aucun\s+[ée]v[ée]nement\s+n['’]est\s+disponible\s+pour\s+le\s+moment",
+    re.IGNORECASE,
+)
 
-
-# --- Récupération + parsing --------------------------------------------------
 
 def fetch_html(url: str) -> str:
-    r = requests.get(url, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    return r.text
+    response = requests.get(url, headers=HEADERS, timeout=30)
+    response.raise_for_status()
+    print(f"HTTP {response.status_code} - {len(response.content)} octets")
+    return response.text
 
 
 def _balance_braces(text: str, start: int):
-    """Retourne l'objet JSON {...} commençant à l'index `start`, en équilibrant
-    les accolades (en ignorant celles à l'intérieur des chaînes)."""
     depth = 0
     in_str = False
-    esc = False
+    escaped = False
     for j in range(start, len(text)):
-        c = text[j]
-        if esc:
-            esc = False
-            continue
-        if c == "\\":
-            esc = True
-            continue
-        if c == '"':
-            in_str = not in_str
-            continue
+        char = text[j]
         if in_str:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_str = False
             continue
-        if c == "{":
+        if char == '"':
+            in_str = True
+        elif char == "{":
             depth += 1
-        elif c == "}":
+        elif char == "}":
             depth -= 1
             if depth == 0:
                 return text[start:j + 1], j + 1
@@ -87,180 +69,203 @@ def _balance_braces(text: str, start: int):
 
 
 def _find_events_in_chunk(text: str):
-    """Extrait tous les objets event {...} d'un fragment JSON déséchappé."""
     events = []
     marker = '"event":{'
     idx = 0
     while True:
         i = text.find(marker, idx)
-        if i == -1:
+        if i < 0:
             break
-        brace_start = i + len('"event":')  # pointe sur le '{'
-        obj, end = _balance_braces(text, brace_start)
-        idx = end
+        obj, end = _balance_braces(text, i + len('"event":'))
+        idx = max(end, i + len(marker))
         if not obj:
             continue
         try:
-            data = json.loads(obj)
+            event = json.loads(obj)
         except json.JSONDecodeError:
             continue
-        if "id" in data and "hasPublicOffersAvailable" in data:
-            events.append(data)
+        if "id" in event and "hasPublicOffersAvailable" in event:
+            events.append(event)
     return events
 
 
-def extract_events(html: str) -> dict:
-    """Parcourt les blocs self.__next_f.push([1, "..."]) de la page Next.js,
-    déséchappe chaque fragment et en extrait les évènements.
-    Retourne {event_id: event_dict}."""
+def extract_events(page: str) -> dict:
     events = {}
     pattern = re.compile(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', re.DOTALL)
-    for m in pattern.finditer(html):
+    for match in pattern.finditer(page):
         try:
-            chunk = json.loads('"' + m.group(1) + '"')  # déséchappe le fragment
+            chunk = json.loads('"' + match.group(1) + '"')
         except json.JSONDecodeError:
             continue
         if '"event":{' not in chunk:
             continue
-        for ev in _find_events_in_chunk(chunk):
-            events[ev["id"]] = ev
+        for event in _find_events_in_chunk(chunk):
+            events[str(event["id"])] = event
     return events
 
 
-# --- Mise en forme -----------------------------------------------------------
-
-def format_event(ev: dict) -> dict:
-    home = ev.get("homeTeam", {}).get("displayName", "?")
-    opp = ev.get("opponent", {}).get("displayName", "?")
-    arena = ev.get("arena", {}).get("name", "")
-    when = ""
-    dt_raw = ev.get("startDatetime")
-    if dt_raw:
+def is_confirmed_empty(page: str) -> bool:
+    # Le message peut apparaître dans le HTML visible ou échappé dans le flux Next.js.
+    if EMPTY_MESSAGE_RE.search(html_lib.unescape(page)):
+        return True
+    for match in re.finditer(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', page, re.DOTALL):
         try:
-            dt = datetime.fromisoformat(dt_raw).astimezone(PARIS)
-            when = dt.strftime("%d/%m/%Y %Hh%M")
-        except ValueError:
-            when = dt_raw
+            chunk = json.loads('"' + match.group(1) + '"')
+        except json.JSONDecodeError:
+            continue
+        if EMPTY_MESSAGE_RE.search(html_lib.unescape(chunk)):
+            return True
+    return False
+
+
+def format_event(event: dict) -> dict:
+    home = (event.get("homeTeam") or {}).get("displayName", "?")
+    opponent = (event.get("opponent") or {}).get("displayName", "?")
+    arena = (event.get("arena") or {}).get("name", "")
+    when = ""
+    raw_datetime = event.get("startDatetime")
+    if raw_datetime:
+        try:
+            parsed = datetime.fromisoformat(raw_datetime.replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(PARIS)
+            when = parsed.strftime("%d/%m/%Y %Hh%M")
+        except (ValueError, TypeError):
+            when = str(raw_datetime)
     return {
-        "id": ev["id"],
-        "title": f"{home} vs {opp}",
+        "id": str(event["id"]),
+        "title": f"{home} vs {opponent}",
         "when": when,
         "arena": arena,
-        "available": bool(ev.get("hasPublicOffersAvailable")),
-        "url": f"{BASE_URL}/fr/evenement/{ev['id']}",
+        "available": bool(event["hasPublicOffersAvailable"]),
+        "url": f"{BASE_URL}/fr/evenement/{event['id']}",
     }
 
 
-# --- Telegram + healthcheck --------------------------------------------------
-
-def send_telegram(message: str) -> None:
+def send_telegram(message: str) -> bool:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram non configuré (secrets manquants).")
-        print(message)
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        print("[WARN] Telegram non configuré (secrets manquants).")
+        return False
     try:
-        requests.post(
-            url,
+        response = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             data={"chat_id": TELEGRAM_CHAT_ID, "text": message, "disable_web_page_preview": False},
             timeout=20,
         )
-    except Exception as e:
-        print(f"[WARN] Envoi Telegram échoué: {e}")
+        response.raise_for_status()
+        if not response.json().get("ok"):
+            raise RuntimeError("Telegram a répondu ok=false")
+        return True
+    except (requests.RequestException, ValueError, RuntimeError) as error:
+        print(f"[WARN] Envoi Telegram échoué: {error}")
+        return False
 
 
 def ping_healthcheck() -> None:
-    """Signale à healthchecks.io que le run s'est bien terminé (dead man's switch)."""
     if not HEALTHCHECK_URL:
         return
     try:
-        requests.get(HEALTHCHECK_URL, timeout=10)
-    except Exception as e:
-        # Un ping raté ne doit jamais faire échouer le run.
-        print(f"[WARN] Ping healthcheck échoué: {e}")
+        response = requests.get(HEALTHCHECK_URL, timeout=10)
+        response.raise_for_status()
+        print("[OK] Ping Healthchecks envoyé.")
+    except requests.RequestException as error:
+        print(f"[WARN] Ping Healthchecks échoué: {error}")
 
-
-# --- State -------------------------------------------------------------------
 
 def load_state() -> dict:
-    if os.path.exists(STATE_FILE):
+    if STATE_FILE.exists():
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
+            state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            if isinstance(state, dict) and isinstance(state.get("events", {}), dict):
+                state.setdefault("events", {})
+                state.setdefault("consecutive_failures", 0)
+                return state
+        except (OSError, ValueError):
             pass
     return {"events": {}, "consecutive_failures": 0}
 
 
 def save_state(state: dict) -> None:
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-
-# --- Main --------------------------------------------------------------------
 
 def main() -> int:
     state = load_state()
-    known = state.get("events", {})
-
+    known = state["events"]
+    previous_mode = state.get("listing_mode")
     try:
-        html = fetch_html(LIST_URL)
-        raw_events = extract_events(html)
-        if not raw_events:
+        page = fetch_html(LIST_URL)
+        raw_events = extract_events(page)
+        if raw_events:
+            mode = "EVENTS"
+        elif is_confirmed_empty(page):
+            mode = "EMPTY"
+        else:
             raise RuntimeError(
-                "Aucun évènement extrait. Le format de la page a peut-être changé, "
-                "ou la requête a été bloquée (anti-bot). Voir le log."
+                "Aucun événement extrait et message officiel de billetterie vide absent. "
+                "Possible changement de format ou blocage anti-bot."
             )
-    except Exception as e:
-        failures = state.get("consecutive_failures", 0) + 1
+    except Exception as error:
+        failures = int(state.get("consecutive_failures", 0)) + 1
         state["consecutive_failures"] = failures
         save_state(state)
-        print(f"[ERREUR] {e}  (échec #{failures})")
-        # NB : on NE ping PAS healthcheck en cas d'échec -> c'est l'absence de
-        # ping qui déclenchera l'alerte côté healthchecks.io.
-        return 1
+        print(f"[ERREUR] {error} (échec #{failures})")
+        return 1  # Aucun ping Healthchecks
 
-    # Succès -> compteur d'échecs à zéro
     state["consecutive_failures"] = 0
+    if mode == "EMPTY":
+        if previous_mode != "EMPTY":
+            send_telegram(
+                "💤 Aucun match actuellement en billetterie.\n"
+                "La billetterie officielle des Dragons ne propose aucun événement pour le moment.\n"
+                "🔎 Surveillance toujours active.\n"
+                f"🔗 {LIST_URL}"
+            )
+        state["listing_mode"] = "EMPTY"
+        save_state(state)
+        print("[OK] Billetterie vide confirmée ; surveillance active.")
+        ping_healthcheck()
+        return 0
 
-    for ev_id, ev in raw_events.items():
-        e = format_event(ev)
-        key = str(ev_id)
-        old = known.get(key)
+    if previous_mode == "EMPTY":
+        send_telegram(
+            "🏒 La billetterie des Dragons est de retour !\n"
+            f"📅 {len(raw_events)} événement(s) affiché(s).\n"
+            "🔎 Surveillance des disponibilités active.\n"
+            f"🔗 {LIST_URL}"
+        )
 
+    for event_id, raw_event in raw_events.items():
+        event = format_event(raw_event)
+        old = known.get(event_id)
         if old is None:
-            statut = "OUVERTE ✅" if e["available"] else "pas encore ouverte ⏳"
+            status = "OUVERTE ✅" if event["available"] else "pas encore ouverte ⏳"
             send_telegram(
                 "🏒 Nouveau match détecté !\n"
-                f"🆚 {e['title']}\n"
-                f"📅 {e['when']}\n"
-                f"📍 {e['arena']}\n"
-                f"🎟️ Billetterie : {statut}\n"
-                f"🔗 {e['url']}"
+                f"🆚 {event['title']}\n📅 {event['when']}\n📍 {event['arena']}\n"
+                f"🎟️ Billetterie : {status}\n🔗 {event['url']}"
             )
-        elif old.get("available") != e["available"]:
-            if e["available"]:
+        elif old.get("available") != event["available"]:
+            if event["available"]:
                 send_telegram(
                     "✅ Billetterie OUVERTE !\n"
-                    f"🆚 {e['title']}\n"
-                    f"📅 {e['when']}\n"
-                    f"🔗 {e['url']}"
+                    f"🆚 {event['title']}\n📅 {event['when']}\n🔗 {event['url']}"
                 )
             else:
                 send_telegram(
                     "⛔ Billetterie fermée / épuisée\n"
-                    f"🆚 {e['title']}\n"
-                    f"📅 {e['when']}\n"
-                    f"🔗 {e['url']}"
+                    f"🆚 {event['title']}\n📅 {event['when']}\n🔗 {event['url']}"
                 )
+        known[event_id] = {
+            "available": event["available"],
+            "title": event["title"],
+            "when": event["when"],
+        }
 
-        known[key] = {"available": e["available"], "title": e["title"], "when": e["when"]}
-
+    state["listing_mode"] = "EVENTS"
     state["events"] = known
     save_state(state)
-    print(f"OK - {len(raw_events)} évènement(s) vérifié(s).")
-
-    # Run réussi : on signale qu'on est vivant.
+    print(f"[OK] {len(raw_events)} événement(s) vérifié(s).")
     ping_healthcheck()
     return 0
 
