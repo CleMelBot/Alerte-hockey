@@ -1,19 +1,23 @@
 
 #!/usr/bin/env python3
-"""Surveillance de la billetterie Rouen Hockey Elite 76 (Next.js SSR)."""
+"""Surveillance automatique de la billetterie des Dragons de Rouen."""
 
 import html as html_lib
 import json
 import os
 import re
 import sys
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
 
-# --- Configuration -----------------------------------------------------------
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
 BASE_URL = "https://billetterie.rouenhockeyelite76.com"
 LIST_URL = BASE_URL + "/fr"
@@ -39,27 +43,28 @@ HEADERS = {
     "Accept-Language": "fr-FR,fr;q=0.9",
 }
 
-EMPTY_MESSAGE_RE = re.compile(
-    r"aucun\s+[ée]v[ée]nement\s+n['’]est\s+disponible\s+pour\s+le\s+moment",
-    re.IGNORECASE,
-)
-
 NEXT_CHUNK_RE = re.compile(
     r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)',
     re.DOTALL,
 )
 
 
-# --- Récupération et diagnostic ---------------------------------------------
+# ============================================================
+# RÉCUPÉRATION HTML
+# ============================================================
 
-def fetch_html(url: str) -> str:
+def fetch_html(url):
     response = requests.get(url, headers=HEADERS, timeout=30)
 
     print(f"[DEBUG] HTTP : {response.status_code}", flush=True)
     print(f"[DEBUG] URL finale : {response.url}", flush=True)
-    print(f"[DEBUG] Taille HTML : {len(response.content)} octets", flush=True)
     print(
-        f"[DEBUG] Content-Type : {response.headers.get('Content-Type')}",
+        f"[DEBUG] Taille HTML : {len(response.content)} octets",
+        flush=True,
+    )
+    print(
+        f"[DEBUG] Content-Type : "
+        f"{response.headers.get('Content-Type')}",
         flush=True,
     )
 
@@ -67,66 +72,119 @@ def fetch_html(url: str) -> str:
 
     page = response.text
 
-    print(f"[DEBUG] Début HTML : {page[:1000]!r}", flush=True)
     print(
-        f"[DEBUG] Présence Next.js : {'self.__next_f.push' in page}",
+        f"[DEBUG] Présence Next.js : "
+        f"{'self.__next_f.push' in page}",
         flush=True,
     )
     print(
-        f"[DEBUG] Présence événements : {'hasPublicOffersAvailable' in page}",
+        f"[DEBUG] Présence événements : "
+        f"{'hasPublicOffersAvailable' in page}",
         flush=True,
     )
     print(
-        f"[DEBUG] Présence 'Aucun' : {'aucun' in page.lower()}",
+        f"[DEBUG] Présence 'aucun' : "
+        f"{'aucun' in page.lower()}",
         flush=True,
     )
 
     return page
 
 
-# --- Extraction des événements ----------------------------------------------
+# ============================================================
+# OUTILS DE DÉCODAGE
+# ============================================================
 
-def _balance_braces(text: str, start: int):
+def normalize_text(text):
+    """Normalise les accents, espaces et apostrophes."""
+
+    text = html_lib.unescape(text)
+
+    text = text.replace("\\u0027", "'")
+    text = text.replace("\\u2019", "'")
+    text = text.replace("\\u00e9", "é")
+    text = text.replace("\\u00e8", "è")
+    text = text.replace("\\n", " ")
+    text = text.replace("\\t", " ")
+
+    text = re.sub(r"<[^>]+>", " ", text)
+
+    text = unicodedata.normalize("NFKD", text)
+
+    text = "".join(
+        character
+        for character in text
+        if not unicodedata.combining(character)
+    )
+
+    text = text.lower()
+    text = text.replace("’", "'")
+    text = " ".join(text.split())
+
+    return text
+
+
+def next_chunks(page):
+    """Décode les fragments JSON du flux Next.js."""
+
+    for match in NEXT_CHUNK_RE.finditer(page):
+        try:
+            yield json.loads('"' + match.group(1) + '"')
+        except json.JSONDecodeError:
+            continue
+
+
+# ============================================================
+# EXTRACTION DES MATCHS
+# ============================================================
+
+def balance_braces(text, start):
     depth = 0
-    in_str = False
+    in_string = False
     escaped = False
 
-    for j in range(start, len(text)):
-        char = text[j]
+    for index in range(start, len(text)):
+        char = text[index]
 
-        if in_str:
+        if in_string:
             if escaped:
                 escaped = False
             elif char == "\\":
                 escaped = True
             elif char == '"':
-                in_str = False
+                in_string = False
             continue
 
         if char == '"':
-            in_str = True
+            in_string = True
         elif char == "{":
             depth += 1
         elif char == "}":
             depth -= 1
+
             if depth == 0:
-                return text[start:j + 1], j + 1
+                return text[start:index + 1], index + 1
 
     return None, len(text)
 
 
-def _find_events_in_chunk(text: str):
+def find_events_in_chunk(text):
     events = []
     marker = '"event":{'
-    idx = 0
+    position = 0
 
     while True:
-        i = text.find(marker, idx)
-        if i < 0:
+        index = text.find(marker, position)
+
+        if index < 0:
             break
 
-        obj, end = _balance_braces(text, i + len('"event":'))
-        idx = max(end, i + len(marker))
+        obj, end = balance_braces(
+            text,
+            index + len('"event":'),
+        )
+
+        position = max(end, index + len(marker))
 
         if not obj:
             continue
@@ -136,61 +194,104 @@ def _find_events_in_chunk(text: str):
         except json.JSONDecodeError:
             continue
 
-        if "id" in event and "hasPublicOffersAvailable" in event:
+        if (
+            "id" in event
+            and "hasPublicOffersAvailable" in event
+        ):
             events.append(event)
 
     return events
 
 
-def extract_events(page: str) -> dict:
+def extract_events(page):
     events = {}
-    chunks = list(NEXT_CHUNK_RE.finditer(page))
+    chunks = list(next_chunks(page))
 
-    print(f"[DEBUG] Fragments Next.js trouvés : {len(chunks)}", flush=True)
+    print(
+        f"[DEBUG] Fragments Next.js décodés : {len(chunks)}",
+        flush=True,
+    )
 
-    for match in chunks:
-        try:
-            chunk = json.loads('"' + match.group(1) + '"')
-        except json.JSONDecodeError:
-            continue
-
+    for chunk in chunks:
         if '"event":{' not in chunk:
             continue
 
-        for event in _find_events_in_chunk(chunk):
+        for event in find_events_in_chunk(chunk):
             events[str(event["id"])] = event
 
-    print(f"[DEBUG] Événements extraits : {len(events)}", flush=True)
+    print(
+        f"[DEBUG] Événements extraits : {len(events)}",
+        flush=True,
+    )
 
     return events
 
 
-# --- Détection de billetterie vide -------------------------------------------
+# ============================================================
+# DÉTECTION BILLETTERIE VIDE
+# ============================================================
 
-def is_confirmed_empty(page: str) -> bool:
-    if EMPTY_MESSAGE_RE.search(html_lib.unescape(page)):
-        print("[DEBUG] Message billetterie vide trouvé dans le HTML.")
-        return True
+def is_confirmed_empty(page):
+    """
+    Reconnaît le message officiel de billetterie vide,
+    même avec des accents ou apostrophes encodés.
+    """
 
-    for match in NEXT_CHUNK_RE.finditer(page):
-        try:
-            chunk = json.loads('"' + match.group(1) + '"')
-        except json.JSONDecodeError:
-            continue
+    candidates = [page]
+    candidates.extend(next_chunks(page))
 
-        if EMPTY_MESSAGE_RE.search(html_lib.unescape(chunk)):
-            print("[DEBUG] Message billetterie vide trouvé dans Next.js.")
-            return True
+    for candidate in candidates:
+        text = normalize_text(candidate)
 
-    print("[DEBUG] Message officiel de billetterie vide NON trouvé.")
+        patterns = [
+            r"aucun evenement n'est disponible",
+            r"aucun evenement disponible pour le moment",
+            r"aucun evenement n'est disponible pour le moment",
+        ]
+
+        for pattern in patterns:
+            if re.search(pattern, text):
+                print(
+                    "[OK] Billetterie vide officiellement confirmée.",
+                    flush=True,
+                )
+                return True
+
+    # Diagnostic ciblé : afficher le contexte du mot "aucun".
+    for candidate in candidates:
+        text = normalize_text(candidate)
+        position = text.find("aucun")
+
+        if position >= 0:
+            start = max(0, position - 100)
+            end = min(len(text), position + 200)
+
+            print(
+                "[DEBUG] Contexte autour de 'aucun' : "
+                + repr(text[start:end]),
+                flush=True,
+            )
+            break
+
+    print(
+        "[DEBUG] Message officiel de billetterie vide non reconnu.",
+        flush=True,
+    )
+
     return False
 
 
-# --- Formatage ---------------------------------------------------------------
+# ============================================================
+# FORMATAGE DES MATCHS
+# ============================================================
 
-def format_event(event: dict) -> dict:
-    home = (event.get("homeTeam") or {}).get("displayName", "?")
-    opponent = (event.get("opponent") or {}).get("displayName", "?")
+def format_event(event):
+    home = (event.get("homeTeam") or {}).get(
+        "displayName", "?"
+    )
+    opponent = (event.get("opponent") or {}).get(
+        "displayName", "?"
+    )
     arena = (event.get("arena") or {}).get("name", "")
 
     when = ""
@@ -201,9 +302,12 @@ def format_event(event: dict) -> dict:
             parsed = datetime.fromisoformat(
                 raw_datetime.replace("Z", "+00:00")
             )
+
             if parsed.tzinfo is not None:
                 parsed = parsed.astimezone(PARIS)
+
             when = parsed.strftime("%d/%m/%Y %Hh%M")
+
         except (ValueError, TypeError):
             when = str(raw_datetime)
 
@@ -212,21 +316,33 @@ def format_event(event: dict) -> dict:
         "title": f"{home} vs {opponent}",
         "when": when,
         "arena": arena,
-        "available": bool(event["hasPublicOffersAvailable"]),
-        "url": f"{BASE_URL}/fr/evenement/{event['id']}",
+        "available": bool(
+            event["hasPublicOffersAvailable"]
+        ),
+        "url": (
+            f"{BASE_URL}/fr/evenement/{event['id']}"
+        ),
     }
 
 
-# --- Telegram ---------------------------------------------------------------
+# ============================================================
+# TELEGRAM
+# ============================================================
 
-def send_telegram(message: str) -> bool:
+def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[WARN] Telegram non configuré (secrets manquants).")
+        print(
+            "[WARN] Telegram non configuré.",
+            flush=True,
+        )
         return False
 
     try:
         response = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            (
+                "https://api.telegram.org/bot"
+                f"{TELEGRAM_TOKEN}/sendMessage"
+            ),
             data={
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": message,
@@ -234,47 +350,80 @@ def send_telegram(message: str) -> bool:
             },
             timeout=20,
         )
+
         response.raise_for_status()
 
         if not response.json().get("ok"):
-            raise RuntimeError("Telegram a répondu ok=false")
+            raise RuntimeError(
+                "Telegram a répondu ok=false"
+            )
 
         return True
 
-    except (requests.RequestException, ValueError, RuntimeError) as error:
-        print(f"[WARN] Envoi Telegram échoué: {error}")
+    except (
+        requests.RequestException,
+        ValueError,
+        RuntimeError,
+    ) as error:
+        print(
+            f"[WARN] Telegram : {error}",
+            flush=True,
+        )
         return False
 
 
-# --- Healthchecks -----------------------------------------------------------
+# ============================================================
+# HEALTHCHECKS
+# ============================================================
 
-def ping_healthcheck() -> None:
+def ping_healthcheck():
     if not HEALTHCHECK_URL:
         return
 
     try:
-        response = requests.get(HEALTHCHECK_URL, timeout=10)
+        response = requests.get(
+            HEALTHCHECK_URL,
+            timeout=10,
+        )
+
         response.raise_for_status()
-        print("[OK] Ping Healthchecks envoyé.")
+
+        print(
+            "[OK] Ping Healthchecks envoyé.",
+            flush=True,
+        )
 
     except requests.RequestException as error:
-        print(f"[WARN] Ping Healthchecks échoué: {error}")
+        print(
+            f"[WARN] Healthchecks : {error}",
+            flush=True,
+        )
 
 
-# --- Gestion de l'état -------------------------------------------------------
+# ============================================================
+# MÉMOIRE
+# ============================================================
 
-def load_state() -> dict:
+def load_state():
     if STATE_FILE.exists():
         try:
             state = json.loads(
-                STATE_FILE.read_text(encoding="utf-8")
+                STATE_FILE.read_text(
+                    encoding="utf-8"
+                )
             )
 
-            if isinstance(state, dict) and isinstance(
-                state.get("events", {}), dict
+            if (
+                isinstance(state, dict)
+                and isinstance(
+                    state.get("events", {}),
+                    dict,
+                )
             ):
                 state.setdefault("events", {})
-                state.setdefault("consecutive_failures", 0)
+                state.setdefault(
+                    "consecutive_failures", 0
+                )
                 return state
 
         except (OSError, ValueError):
@@ -286,16 +435,22 @@ def load_state() -> dict:
     }
 
 
-def save_state(state: dict) -> None:
+def save_state(state):
     STATE_FILE.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(
+            state,
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n",
         encoding="utf-8",
     )
 
 
-# --- Programme principal -----------------------------------------------------
+# ============================================================
+# PROGRAMME PRINCIPAL
+# ============================================================
 
-def main() -> int:
+def main():
     state = load_state()
     known = state["events"]
     previous_mode = state.get("listing_mode")
@@ -312,37 +467,46 @@ def main() -> int:
 
         else:
             raise RuntimeError(
-                "Aucun événement extrait et message officiel "
-                "de billetterie vide absent. "
-                "Possible changement de format ou blocage anti-bot."
+                "Aucun événement extrait et "
+                "billetterie vide non confirmée. "
+                "Vérifier les logs DEBUG."
             )
 
     except Exception as error:
-        failures = int(
-            state.get("consecutive_failures", 0)
-        ) + 1
+        failures = (
+            int(
+                state.get(
+                    "consecutive_failures", 0
+                )
+            ) + 1
+        )
 
         state["consecutive_failures"] = failures
         save_state(state)
 
         print(
-            f"[ERREUR] {error} (échec #{failures})",
+            f"[ERREUR] {error} "
+            f"(échec #{failures})",
             flush=True,
         )
 
-        # Aucun ping Healthchecks en cas d'échec.
+        # Pas de ping Healthchecks en cas d'erreur.
         return 1
 
-    # Run réussi
+    # Exécution réussie.
     state["consecutive_failures"] = 0
 
-    # --- Billetterie vide ----------------------------------------------------
+    # --------------------------------------------------------
+    # AUCUN MATCH
+    # --------------------------------------------------------
 
     if mode == "EMPTY":
         if previous_mode != "EMPTY":
             send_telegram(
-                "💤 Aucun match actuellement en billetterie.\n"
-                "La billetterie officielle des Dragons ne propose "
+                "💤 Aucun match actuellement "
+                "en billetterie.\n"
+                "La billetterie officielle "
+                "des Dragons ne propose "
                 "aucun événement pour le moment.\n"
                 "🔎 Surveillance toujours active.\n"
                 f"🔗 {LIST_URL}"
@@ -352,24 +516,31 @@ def main() -> int:
         save_state(state)
 
         print(
-            "[OK] Billetterie vide confirmée ; surveillance active.",
+            "[OK] Billetterie vide. "
+            "Surveillance active.",
             flush=True,
         )
 
         ping_healthcheck()
         return 0
 
-    # --- Retour des événements ----------------------------------------------
+    # --------------------------------------------------------
+    # RETOUR DES MATCHS
+    # --------------------------------------------------------
 
     if previous_mode == "EMPTY":
         send_telegram(
-            "🏒 La billetterie des Dragons est de retour !\n"
-            f"📅 {len(raw_events)} événement(s) affiché(s).\n"
-            "🔎 Surveillance des disponibilités active.\n"
+            "🏒 La billetterie des Dragons "
+            "est de retour !\n"
+            f"📅 {len(raw_events)} "
+            "événement(s) affiché(s).\n"
+            "🔎 Surveillance active.\n"
             f"🔗 {LIST_URL}"
         )
 
-    # --- Surveillance des matchs --------------------------------------------
+    # --------------------------------------------------------
+    # SURVEILLANCE DES MATCHS
+    # --------------------------------------------------------
 
     for event_id, raw_event in raw_events.items():
         event = format_event(raw_event)
@@ -391,7 +562,10 @@ def main() -> int:
                 f"🔗 {event['url']}"
             )
 
-        elif old.get("available") != event["available"]:
+        elif (
+            old.get("available")
+            != event["available"]
+        ):
             if event["available"]:
                 send_telegram(
                     "✅ Billetterie OUVERTE !\n"
@@ -399,6 +573,7 @@ def main() -> int:
                     f"📅 {event['when']}\n"
                     f"🔗 {event['url']}"
                 )
+
             else:
                 send_telegram(
                     "⛔ Billetterie fermée / épuisée\n"
@@ -419,11 +594,13 @@ def main() -> int:
     save_state(state)
 
     print(
-        f"[OK] {len(raw_events)} événement(s) vérifié(s).",
+        f"[OK] {len(raw_events)} "
+        "événement(s) vérifié(s).",
         flush=True,
     )
 
     ping_healthcheck()
+
     return 0
 
 
