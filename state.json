@@ -61,7 +61,7 @@
       "when": "30/10/2026 21h00"
     },
     "15": {
-      "available": false,
+      "available": true,
       "title": "Mogo vs Belfast",
       "when": "13/11/2026 15h00"
     },
