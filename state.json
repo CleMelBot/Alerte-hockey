@@ -69,6 +69,16 @@
       "available": false,
       "title": "Rouen vs Katowice",
       "when": "13/11/2026 20h00"
+    },
+    "16": {
+      "available": false,
+      "title": "Katowice vs Mogo",
+      "when": "14/11/2026 15h00"
+    },
+    "33": {
+      "available": false,
+      "title": "Rouen vs Belfast",
+      "when": "14/11/2026 20h00"
     }
   },
   "consecutive_failures": 0,
