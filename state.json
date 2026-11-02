@@ -62,10 +62,10 @@
     },
     "15": {
       "available": false,
-      "title": "Mogo vs Katowice",
-      "when": "13/11/2026 16h00"
+      "title": "Mogo vs Belfast",
+      "when": "13/11/2026 15h00"
     }
   },
   "consecutive_failures": 0,
-  "listing_mode": "EMPTY"
+  "listing_mode": "EVENTS"
 }
