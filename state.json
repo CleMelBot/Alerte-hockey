@@ -96,7 +96,7 @@
       "when": "20/11/2026 20h30"
     },
     "19": {
-      "available": false,
+      "available": true,
       "title": "Rouen vs Bordeaux",
       "when": "27/11/2026 20h00"
     }
