@@ -94,6 +94,11 @@
       "available": true,
       "title": "Rouen vs Nice",
       "when": "20/11/2026 20h30"
+    },
+    "19": {
+      "available": false,
+      "title": "Rouen vs Bordeaux",
+      "when": "27/11/2026 20h00"
     }
   },
   "consecutive_failures": 0,
