@@ -99,6 +99,11 @@
       "available": true,
       "title": "Rouen vs Bordeaux",
       "when": "27/11/2026 20h00"
+    },
+    "20": {
+      "available": false,
+      "title": "Rouen vs Marseille",
+      "when": "01/12/2026 20h00"
     }
   },
   "consecutive_failures": 0,
